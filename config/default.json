@@ -1,0 +1,9 @@
+{
+  "thumbnailer": {
+    "tempdir": "/tmp",
+    "secret": "123456",
+    "retry": 3,
+    "timeout": 1000,
+    "maxage": 101
+  }
+}
