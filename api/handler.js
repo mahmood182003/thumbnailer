@@ -97,7 +97,7 @@ handler.getThumbnail = function getThumbnail({urlBase64:urlBase64, maxWidth, max
             return callback(err);
         }
         debug('image downloaded in ', filename);
-        var rstream = gm(filename).resize(maxWidth, maxHeight, '!').stream().on("end", ()=> {
+        var rstream = gm(filename).resize(maxWidth, maxHeight).stream().on("end", ()=> {
             fs.unlink(filename, (err)=> {
                 if (err) {
                     throw new Error(err);
