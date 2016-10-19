@@ -20,7 +20,7 @@ router.get('/:urlBase64/:maxWidth/:maxHeight/:signatureBase64.:extension', funct
             return next(err);
         }
         res.setHeader("Cache-Control", "public, max-age=" + myConf.maxage);
-        res.writeHead(200, 'image/png');
+        res.writeHead(200, {'Content-Type': 'image/png' });
         readStream.pipe(res);
     });
 });

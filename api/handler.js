@@ -2,6 +2,7 @@ var handler = {};
 module.exports = handler;
 
 const fs = require('fs'),
+    mkdirp = require('mkdirp'),
     debug = require('debug')('imagethumbnailer'),
     request = require('request'),
     base64url = require('base64-url'),
@@ -25,9 +26,10 @@ function getSignature(secret, uriBase64, width, height, ext) {
         .digest('base64');
     return base64url.escape(hmac);
 }
-const BADINPUT = 400, FORBIDDEN = 403, TIMEOUT = 504, BADGW = 502, ETIMEDOUT = "ETIMEDOUT", TEMP_ERR = ["ENOTFOUND", "EAI_AGAIN"];
+const BADREQ = 400, FORBIDDEN = 403, TIMEOUT = 504, BADGW = 502, ECONNREFUSED = "ECONNREFUSED", ETIMEDOUT = "ETIMEDOUT", TEMP_ERR = ["ENOTFOUND", "EAI_AGAIN"];
 
 var download = function (uri, attempts, callback) {
+
     request.get(uri, {timeout: myConf.timeout}, function (err, res) {
         if (err) {
             debug("download error ", attempts, err)
@@ -38,9 +40,14 @@ var download = function (uri, attempts, callback) {
                     }, 1000);
                 } else if (err.code === ETIMEDOUT) { // either server hasn't responded yet or it's very slow
                     err = TIMEOUT;
+                } else if (err.code === ECONNREFUSED) {
+                    err = BADREQ;
                 }
             }
             return callback(err || res.statusCode || 500);
+        }
+        if (!/^(application|image)\/.*/.test(res.headers['content-type'])) {
+            return callback(BADREQ);
         }
         debug('content-type:', res.headers['content-type']);
         debug('content-length:', res.headers['content-length']);
@@ -56,7 +63,7 @@ var download = function (uri, attempts, callback) {
 };
 
 function hasValidattionErr(urlBase64, imgUrl, maxWidth, maxHeight, signatureBase64, extension) {
-    console.log("sig for testing ===> ", getSignature(myConf.secret, urlBase64, maxWidth, maxHeight, extension));
+    debug("sig for testing ===> ", getSignature(myConf.secret, urlBase64, maxWidth, maxHeight, extension));
     if (signatureBase64 !== getSignature(myConf.secret, urlBase64, maxWidth, maxHeight, extension)) {
         return FORBIDDEN;
 
@@ -82,7 +89,7 @@ handler.getThumbnail = function getThumbnail({urlBase64:urlBase64, maxWidth, max
 
     if (code = hasValidattionErr(urlBase64, imgUrl, maxWidth, maxHeight, signatureBase64, extension)) {
         debug("validation error: ", code);
-        return callback(code < 50 ? BADINPUT : code);
+        return callback(code < 50 ? BADREQ : code);
     }
 
     download(imgUrl, myConf.retry, function (err, filename) {
@@ -101,3 +108,8 @@ handler.getThumbnail = function getThumbnail({urlBase64:urlBase64, maxWidth, max
         callback(null, rstream);
     });
 };
+
+// init
+mkdirp(tmpDir, function (err) {
+    if (err) console.error(err)
+});

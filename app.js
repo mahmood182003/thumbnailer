@@ -10,13 +10,13 @@ var app = express();
 app.set('view engine', 'jade');
 
 // middleware stack
-app.use(logger('dev'));
+//app.use(logger('dev'));
 
 app.use('/', routes);
 
 // catch 404 and forward to error handler
-app.use(function (err,req, res, next) {
-    if(!err) {
+app.use(function (err, req, res, next) {
+    if (!err) {
         var err = new Error('Not Found');
         err.status = 404;
     }
@@ -29,18 +29,14 @@ app.use(function (err,req, res, next) {
 // will print stacktrace
 if (app.get('env') === 'development') {
     app.use(function (err, req, res, next) {
-        res.send(err.status || err || 500);
+        res.sendStatus(err.status || err || 500);
     });
 }
 
 // production error handler
 // no stacktraces leaked to user
 app.use(function (err, req, res, next) {
-    res.status(err.status || 500);
-    res.render('error', {
-        message: err.message,
-        error: {}
-    });
+    res.sendStatus(err.status || 500);
 });
 
 
