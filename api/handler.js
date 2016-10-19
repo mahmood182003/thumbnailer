@@ -23,7 +23,7 @@ function getSignature(secret, uriBase64, width, height, ext) {
         .update(width.toString())
         .update(height.toString())
         .update(ext)
-        .digest('base64');
+        .digest('base64')
     return base64url.escape(hmac);
 }
 const BADREQ = 400, FORBIDDEN = 403, TIMEOUT = 504, BADGW = 502, ECONNREFUSED = "ECONNREFUSED", ETIMEDOUT = "ETIMEDOUT", TEMP_ERR = ["ENOTFOUND", "EAI_AGAIN"];
