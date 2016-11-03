@@ -4,6 +4,7 @@
     "secret": "123456",
     "retry": 3,
     "timeout": 10000,
-    "maxage": 10000
+    "maxage": 10000,
+    "LOG_PATH": "/mylog.log"
   }
 }

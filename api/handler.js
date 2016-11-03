@@ -1,115 +1,123 @@
-var handler = {};
-module.exports = handler;
+/* eslint-env node */
 
-const fs = require('fs'),
-    mkdirp = require('mkdirp'),
-    debug = require('debug')('imagethumbnailer'),
-    request = require('request'),
-    base64url = require('base64-url'),
-    validator = require('validator'),
-    gm = require('gm').subClass({imageMagick: true});
+var handler = {}
+module.exports = handler
 
-const config = require('config'),
-    myConf = config.get("thumbnailer");
+const fs = require('fs')
+const mkdirp = require('mkdirp')
+const debug = require('debug')('imagethumbnailer')
+const request = require('request')
+const base64url = require('base64-url')
+const validator = require('validator')
+const gm = require('gm').subClass({ imageMagick: true })
 
-const temp = require('temp'),
-    rootDir = process.cwd(),
-    tmpDir = rootDir + myConf.tempdir;
+const config = require('config')
+const myConf = config.get('thumbnailer')
 
-const crypto = require('crypto');
-function getSignature(secret, uriBase64, width, height, ext) {
-    const hmac = crypto.createHmac('sha256', secret)
-        .update(uriBase64)
-        .update(width.toString())
-        .update(height.toString())
-        .update(ext)
-        .digest('base64')
-    return base64url.escape(hmac);
-}
-const BADREQ = 400, FORBIDDEN = 403, TIMEOUT = 504, BADGW = 502, ECONNREFUSED = "ECONNREFUSED", ETIMEDOUT = "ETIMEDOUT", TEMP_ERR = ["ENOTFOUND", "EAI_AGAIN"];
+const temp = require('temp')
+const rootDir = process.cwd()
+const tmpDir = rootDir + myConf.tempdir
 
-var download = function (uri, attempts, callback) {
-
-    request.get(uri, {timeout: myConf.timeout}, function (err, res) {
-        if (err) {
-            debug("download error ", attempts, err)
-            if (err) {
-                if (TEMP_ERR.includes(err.code) && (err = BADGW) && --attempts > 0) { // temporary problems, might retry
-                    return setTimeout(()=> {
-                        download(uri, attempts, callback);
-                    }, 1000);
-                } else if (err.code === ETIMEDOUT) { // either server hasn't responded yet or it's very slow
-                    err = TIMEOUT;
-                } else if (err.code === ECONNREFUSED) {
-                    err = BADREQ;
-                }
-            }
-            return callback(err || res.statusCode || 500);
-        }
-        if (!/^(application|image)\/.*/.test(res.headers['content-type'])) {
-            return callback(BADREQ);
-        }
-        debug('content-type:', res.headers['content-type']);
-        debug('content-length:', res.headers['content-length']);
-
-        var stream = temp.createWriteStream({dir: tmpDir});
-        stream.on("close", ()=> {
-            callback(null, stream.path)
-        });
-        // TODO test when readonly
-        request(uri).pipe(stream);
-
-    });
-};
-
-function hasValidattionErr(urlBase64, imgUrl, maxWidth, maxHeight, signatureBase64, extension) {
-    debug("sig for testing ===> ", getSignature(myConf.secret, urlBase64, maxWidth, maxHeight, extension));
-    if (signatureBase64 !== getSignature(myConf.secret, urlBase64, maxWidth, maxHeight, extension)) {
-        return FORBIDDEN;
-
-    } else if (!validator.isURL(imgUrl)) {
-        return 1;
-
-    } else if (!validator.isInt(maxWidth, {min: 3, max: 1024})) {
-        return 5;
-
-    } else if (!validator.isInt(maxHeight, {min: 3, max: 1024})) {
-        return 10;
-
-    } else if (!["gif", "jpg", "jpeg", "png"].includes(extension)) {
-        return 15;
-
-    }
-    return 0;
+const bunyan = require('bunyan')
+const log = bunyan.createLogger({
+  name: 'thumbnailer',
+  serializers: bunyan.stdSerializers,
+  streams: [ { path: rootDir + myConf.LOG_PATH, period: '1d' } ]
+})
+const crypto = require('crypto')
+function getSignature (secret, urlBase64, width, height, ext) {
+  const hmac = crypto.createHmac('sha256', secret)
+    .update(urlBase64)
+    .update(width.toString())
+    .update(height.toString())
+    .update(ext)
+    .digest('base64')
+  return base64url.escape(hmac)
 }
 
-handler.getThumbnail = function getThumbnail({urlBase64:urlBase64, maxWidth, maxHeight, signatureBase64, extension}, callback) {
-    debug('getThumbnail: ', arguments);
-    var imgUrl = base64url.decode(urlBase64), code;
+// NJS http errors
+const ERRORS = {
+  BADREQ: 400,
+  FORBIDDEN: 403,
+  TIMEOUT: 504,
+  BADGW: 502,
+  ECONNREFUSED: 'ECONNREFUSED',
+  ETIMEDOUT: 'ETIMEDOUT',
+  TEMP_ERR: [ 'ENOTFOUND', 'EAI_AGAIN' ]
+}
 
-    if (code = hasValidattionErr(urlBase64, imgUrl, maxWidth, maxHeight, signatureBase64, extension)) {
-        debug("validation error: ", code);
-        return callback(code < 50 ? BADREQ : code);
+var download = function (url, attempts, callback) {
+  request.get(url, { timeout: myConf.timeout }, function (err, res) {
+    if (err) {
+      debug('download error ', attempts, err)
+      if (ERRORS.TEMP_ERR.includes(err.code) && (err = ERRORS.BADGW) && --attempts > 0) { // temporary problems => retry
+        return setTimeout(() => {
+          download(url, attempts, callback)
+        }, 1000)
+      } else if (err.code === ERRORS.ETIMEDOUT) { // either server hasn't responded yet or it's very slow
+        err = ERRORS.TIMEOUT
+      } else if (err.code === ERRORS.ECONNREFUSED) {
+        err = ERRORS.BADREQ
+      }
+      return callback(err || res.statusCode || 500)
     }
+    // mime-type must match image/* or application/*
+    if (!/^(application|image)\/.*/.test(res.headers[ 'content-type' ])) {
+      log.warn('received unexpected mime-type:', url, res.headers)
+      return callback(ERRORS.BADREQ)
+    }
+    debug('content-type:', res.headers[ 'content-type' ])
 
-    download(imgUrl, myConf.retry, function (err, filename) {
+    var stream = temp.createWriteStream({ dir: tmpDir })
+    stream.on('close', () => {
+      callback(null, stream.path)
+    })
+    request(url).pipe(stream)
+  })
+}
+
+function hasValidattionErr (urlBase64, imgUrl, maxWidth, maxHeight, signatureBase64, extension) {
+  debug('copy the signature for your tests ==> ', getSignature(myConf.secret, urlBase64, maxWidth, maxHeight, extension))
+  if (signatureBase64 !== getSignature(myConf.secret, urlBase64, maxWidth, maxHeight, extension)) {
+    return ERRORS.FORBIDDEN
+  } else if (!validator.isURL(imgUrl)) {
+    return 1
+  } else if (!validator.isInt(maxWidth, { min: 3, max: 1024 })) {
+    return 5
+  } else if (!validator.isInt(maxHeight, { min: 3, max: 1024 })) {
+    return 10
+  } else if (![ 'gif', 'jpg', 'jpeg', 'png' ].includes(extension)) {
+    return 15
+  }
+  return 0
+}
+
+handler.getThumbnail = function getThumbnail ({ urlBase64, maxWidth, maxHeight, signatureBase64, extension }, callback) {
+  var imgUrl = base64url.decode(urlBase64)
+  var code = hasValidattionErr(urlBase64, imgUrl, maxWidth, maxHeight, signatureBase64, extension)
+  if (code) {
+    debug('validation error: ', code)
+    return callback(code < 50 ? ERRORS.BADREQ : code)
+  }
+
+  download(imgUrl, myConf.retry, function (err, filename) {
+    if (err) {
+      return callback(err)
+    }
+    debug('downloaded in ' + filename)
+    var rstream = gm(filename).resize(maxWidth, maxHeight).flatten().stream().on('end', () => {
+      fs.unlink(filename, (err) => {
         if (err) {
-            return callback(err);
+          throw new Error(err)
         }
-        debug('image downloaded in ', filename);
-        var rstream = gm(filename).resize(maxWidth, maxHeight).stream().on("end", ()=> {
-            fs.unlink(filename, (err)=> {
-                if (err) {
-                    throw new Error(err);
-                }
-            });
-
-        });
-        callback(null, rstream);
-    });
-};
+      })
+    })
+    callback(null, rstream)
+  })
+}
 
 // init
+log.info('initializing handler...')
 mkdirp(tmpDir, function (err) {
-    if (err) console.error(err)
-});
+  if (err) log.error('could not create temp dir', err)
+})
